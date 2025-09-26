@@ -134,29 +134,6 @@ function App() {
     setCurrentCard(newQueue[0] || null);
   };
 
-  const BackButton = () => (
-  <button
-    onClick={() => {
-      setCurrentSet(null);
-      setStudyMode(false);
-    }}
-    style={{
-      backgroundColor: "#4caf50",
-      position: "absolute",
-      top: "10px",
-      right: "10px",
-      padding: "6px 12px",
-      color: "#f5f5f5",
-      border: "none",
-      borderRadius: "6px",
-      cursor: "pointer",
-      zIndex: 1000
-    }}
-  >
-    Back
-  </button>
-);
-
   // Simple modal
   const Modal = ({ message, onClose }) => {
     if (!message) return null;
@@ -317,8 +294,24 @@ function App() {
           </div>
         </div>
       ) : currentSet === "new" ? (
-        <div style={{ position: "relative" }}>
-          <BackButton />
+        <div>
+          <button
+            onClick={() => {
+              setCurrentSet(null);
+              setStudyMode(false);
+            }}
+            style={{
+              backgroundColor: "#4caf50",
+              padding: "6px 12px",
+              color: "#f5f5f5",
+              border: "none",
+              borderRadius: "6px",
+              cursor: "pointer",
+              marginBottom: "10px"
+            }}
+          >
+            Back
+          </button>
           <h1>Create New Set</h1>
           <input
             type="text"
@@ -414,12 +407,38 @@ function App() {
           </button>
         </div>
       ) : studyMode && currentCard ? (
-        <div style={{ position: "relative" }}>
-          <BackButton />
+        <div>
           <h1>{currentSet.title}</h1>
-          <p>
-            Remaining: {queue.length} | Right: {correct} | Wrong: {wrong}
-          </p>
+
+          {/* Stats + Back inline */}
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: "10px"
+            }}
+          >
+            <p style={{ margin: 0 }}>
+              Remaining: {queue.length} | Right: {correct} | Wrong: {wrong}
+            </p>
+            <button
+              onClick={() => {
+                setCurrentSet(null);
+                setStudyMode(false);
+              }}
+              style={{
+                backgroundColor: "#4caf50",
+                padding: "6px 12px",
+                color: "#f5f5f5",
+                border: "none",
+                borderRadius: "6px",
+                cursor: "pointer"
+              }}
+            >
+              Back
+            </button>
+          </div>
 
           <div
             style={{
@@ -494,8 +513,7 @@ function App() {
           </button>
         </div>
       ) : studyMode && !currentCard ? (
-        <div style={{ position: "relative" }}>
-          <BackButton />
+        <div>
           <h1>Done!</h1>
           <p>
             Right: {correct} | Wrong: {wrong}
