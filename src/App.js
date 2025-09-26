@@ -2,12 +2,12 @@ import React, { useState, useEffect } from "react";
 
 function App() {
   const [sets, setSets] = useState([]);
+  const [initialized, setInitialized] = useState(false);
   const [currentSet, setCurrentSet] = useState(null);
   const [title, setTitle] = useState("");
   const [cards, setCards] = useState([]);
   const [newKey, setNewKey] = useState("");
   const [newValue, setNewValue] = useState("");
-  const [jsonInput, setJsonInput] = useState("");
   const [studyMode, setStudyMode] = useState(false);
   const [queue, setQueue] = useState([]);
   const [currentCard, setCurrentCard] = useState(null);
@@ -16,7 +16,7 @@ function App() {
   const [wrong, setWrong] = useState(0);
   const [hoverIndex, setHoverIndex] = useState(null);
   const [studyOptions, setStudyOptions] = useState([]);
-  const [modalMessage, setModalMessage] = useState(""); // NEW
+  const [modalMessage, setModalMessage] = useState("");
 
   // Load sets from localStorage once
   useEffect(() => {
@@ -24,42 +24,57 @@ function App() {
     if (savedSets) {
       setSets(JSON.parse(savedSets));
     }
+    setInitialized(true);
   }, []);
 
   // Save sets whenever updated
   useEffect(() => {
-    localStorage.setItem("flashcardSets", JSON.stringify(sets));
-  }, [sets]);
+    if (initialized) {
+      localStorage.setItem("flashcardSets", JSON.stringify(sets));
+    }
+  }, [sets, initialized]);
 
   const createSet = () => {
-    if (!title || cards.length === 0) return;
-    const newSet = { title, cards };
-    const updatedSets = [...sets, newSet];
-    setSets(updatedSets);
+    if (!title.trim() || cards.length === 0) {
+      setModalMessage("Please add a title and at least one card before saving.");
+      return;
+    }
+    const newSet = { title: title.trim(), cards: [...cards] };
+    setSets((prev) => [...prev, newSet]);
+    // reset
     setTitle("");
     setCards([]);
     setCurrentSet(null);
+    setModalMessage("Set saved successfully!");
   };
 
   const addCard = () => {
-    if (!newKey || !newValue) return;
-    setCards([...cards, { key: newKey, value: newValue }]);
+    if (!newKey.trim() || !newValue.trim()) return;
+    setCards((prev) => [...prev, { key: newKey.trim(), value: newValue.trim() }]);
     setNewKey("");
     setNewValue("");
   };
 
-  const importFromText = () => {
-    try {
-      const importedCards = JSON.parse(jsonInput);
-      if (Array.isArray(importedCards)) {
-        setCards(importedCards);
-        setJsonInput("");
-      } else {
-        setModalMessage("JSON must be an array of cards");
+  // Import JSON from file
+  const importFromFile = (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const importedCards = JSON.parse(e.target.result);
+        if (Array.isArray(importedCards)) {
+          setCards(importedCards);
+          setModalMessage(`Imported ${importedCards.length} cards successfully.`);
+        } else {
+          setModalMessage("JSON must be an array of cards");
+        }
+      } catch (err) {
+        setModalMessage("Invalid JSON");
       }
-    } catch (err) {
-      setModalMessage("Invalid JSON");
-    }
+    };
+    reader.readAsText(file);
   };
 
   const startStudy = (setIndex) => {
@@ -99,10 +114,10 @@ function App() {
   const submitAnswer = () => {
     if (!selectedAnswer) return;
     if (selectedAnswer === currentCard.value) {
-      setCorrect(correct + 1);
+      setCorrect((c) => c + 1);
       nextCard(queue.slice(1));
     } else {
-      setWrong(wrong + 1);
+      setWrong((w) => w + 1);
       const rest = queue.slice(1);
       const insertIndex = Math.floor(Math.random() * (rest.length + 1));
       const newQueue = [...rest];
@@ -120,28 +135,30 @@ function App() {
   };
 
   const BackButton = () => (
-    <button
-      onClick={() => {
-        setCurrentSet(null);
-        setStudyMode(false);
-        setCards([]);
-        setStudyOptions([]);
-      }}
-      style={{
-        backgroundColor: "#4caf50",
-        position: "absolute",
-        top: "10px",
-        right: "10px",
-        padding: "6px 12px",
-        color: "#f5f5f5"
-      }}
-    >
-      Back
-    </button>
-  );
+  <button
+    onClick={() => {
+      setCurrentSet(null);
+      setStudyMode(false);
+    }}
+    style={{
+      backgroundColor: "#4caf50",
+      position: "absolute",
+      top: "10px",
+      right: "10px",
+      padding: "6px 12px",
+      color: "#f5f5f5",
+      border: "none",
+      borderRadius: "6px",
+      cursor: "pointer",
+      zIndex: 1000
+    }}
+  >
+    Back
+  </button>
+);
 
   // Simple modal
-  const Modal = ({ message, onClose, onConfirm }) => {
+  const Modal = ({ message, onClose }) => {
     if (!message) return null;
     const text = typeof message === "string" ? message : message.text;
     return (
@@ -254,10 +271,7 @@ function App() {
                 onMouseEnter={() => setHoverIndex(i)}
                 onMouseLeave={() => setHoverIndex(null)}
               >
-                <div
-                  style={{ cursor: "pointer" }}
-                  onClick={() => startStudy(i)}
-                >
+                <div style={{ cursor: "pointer" }} onClick={() => startStudy(i)}>
                   <h2 style={{ fontSize: "1rem" }}>{s.title}</h2>
                   <p>{s.cards.length} cards</p>
                 </div>
@@ -303,7 +317,7 @@ function App() {
           </div>
         </div>
       ) : currentSet === "new" ? (
-        <div>
+        <div style={{ position: "relative" }}>
           <BackButton />
           <h1>Create New Set</h1>
           <input
@@ -362,35 +376,13 @@ function App() {
             </button>
           </div>
 
-          <p style={{ marginTop: "20px" }}>
-            Ask ChatGPT to write JSON representing your flash card set! Paste
-            the JSON here.
-          </p>
-          <textarea
-            placeholder="Paste JSON here"
-            value={jsonInput}
-            onChange={(e) => setJsonInput(e.target.value)}
-            style={{
-              width: "100%",
-              height: "100px",
-              marginBottom: "10px",
-              backgroundColor: "#1e1e1e",
-              color: "#f5f5f5",
-              border: "1px solid #555"
-            }}
+          <p style={{ marginTop: "20px" }}>Import flashcards from JSON file:</p>
+          <input
+            type="file"
+            accept=".json"
+            onChange={importFromFile}
+            style={{ marginBottom: "20px" }}
           />
-          <button
-            onClick={importFromText}
-            style={{
-              padding: "8px 16px",
-              marginBottom: "20px",
-              backgroundColor: "#4caf50",
-              color: "#fff",
-              border: "1px solid #555"
-            }}
-          >
-            Import JSON
-          </button>
 
           <ul style={{ marginTop: "20px" }}>
             {cards.map((c, i) => (
@@ -422,7 +414,7 @@ function App() {
           </button>
         </div>
       ) : studyMode && currentCard ? (
-        <div>
+        <div style={{ position: "relative" }}>
           <BackButton />
           <h1>{currentSet.title}</h1>
           <p>
@@ -442,15 +434,42 @@ function App() {
             {currentCard.key}
           </div>
 
-          <div>
+          {/* ANSWER GRID */}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: `repeat(${Math.min(
+                2,
+                studyOptions.length
+              )}, 1fr)`,
+              gap: "10px",
+              marginTop: "20px"
+            }}
+          >
             {studyOptions.map((value, i) => (
-              <label key={i} style={{ display: "block", marginBottom: "5px" }}>
+              <label
+                key={i}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  backgroundColor:
+                    selectedAnswer === value ? "#4caf50" : "#1e1e1e",
+                  border: "1px solid #555",
+                  padding: "20px",
+                  borderRadius: "8px",
+                  cursor: "pointer",
+                  textAlign: "center",
+                  minHeight: "60px"
+                }}
+              >
                 <input
                   type="radio"
                   name={`answer-${currentCard.key}`}
                   value={value}
                   checked={selectedAnswer === value}
                   onChange={() => setSelectedAnswer(value)}
+                  style={{ display: "none" }}
                 />
                 {value}
               </label>
@@ -460,18 +479,22 @@ function App() {
           <button
             onClick={submitAnswer}
             style={{
-              padding: "10px 20px",
-              marginTop: "10px",
+              width: "100%",
+              padding: "15px",
+              marginTop: "20px",
               backgroundColor: "#4caf50",
               color: "#fff",
-              border: "1px solid #555"
+              border: "1px solid #555",
+              fontSize: "1.2rem",
+              borderRadius: "8px",
+              cursor: "pointer"
             }}
           >
             Submit
           </button>
         </div>
       ) : studyMode && !currentCard ? (
-        <div>
+        <div style={{ position: "relative" }}>
           <BackButton />
           <h1>Done!</h1>
           <p>
@@ -495,11 +518,7 @@ function App() {
         </div>
       ) : null}
 
-      <Modal
-        message={modalMessage}
-        onClose={() => setModalMessage("")}
-        onConfirm={() => setModalMessage("")}
-      />
+      <Modal message={modalMessage} onClose={() => setModalMessage("")} />
     </div>
   );
 }
