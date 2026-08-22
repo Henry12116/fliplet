@@ -1,4 +1,20 @@
 import React, { useState, useEffect } from "react";
+import {
+  buildStudyOptions,
+  CHOICE_MODES,
+  DEFAULT_STUDY_SETTINGS,
+  isDeckEnvelope,
+  normalizeDeck,
+  normalizeStudySettings,
+  shuffleArray,
+  validateStudySettings
+} from "./deckUtils";
+
+const createDefaultStudySettings = () => ({
+  ...DEFAULT_STUDY_SETTINGS,
+  choiceMode: CHOICE_MODES.RANDOM,
+  choices: []
+});
 
 function App() {
   const [sets, setSets] = useState([]);
@@ -17,12 +33,53 @@ function App() {
   const [hoverIndex, setHoverIndex] = useState(null);
   const [studyOptions, setStudyOptions] = useState([]);
   const [modalMessage, setModalMessage] = useState("");
+  const [editingSetIndex, setEditingSetIndex] = useState(null);
+  const [studySettings, setStudySettings] = useState(
+    createDefaultStudySettings
+  );
 
   // Load sets from localStorage once
   useEffect(() => {
     const savedSets = localStorage.getItem("flashcardSets");
     if (savedSets) {
-      setSets(JSON.parse(savedSets));
+      try {
+        const parsedSets = JSON.parse(savedSets);
+        if (!Array.isArray(parsedSets)) {
+          throw new Error("Saved flashcard data must be a list of sets.");
+        }
+
+        setSets(
+          parsedSets.map((set, index) =>
+            normalizeDeck(set, { title: "Set " + (index + 1) })
+          )
+        );
+      } catch (error) {
+        setModalMessage({
+          text:
+            "Fliplet could not load the saved sets: " + error.message +
+            "\n\nBack up the unreadable data and reset saved sets?",
+          confirmLabel: "Back up and reset",
+          cancelLabel: "Keep data",
+          onConfirm: () => {
+            try {
+              localStorage.setItem("flashcardSetsBackup", savedSets);
+              localStorage.removeItem("flashcardSets");
+              setSets([]);
+              setInitialized(true);
+              setModalMessage(
+                "The unreadable data was preserved as flashcardSetsBackup. " +
+                  "You can create and save sets again."
+              );
+            } catch (storageError) {
+              setModalMessage(
+                "The saved data could not be backed up or reset: " +
+                  storageError.message
+              );
+            }
+          }
+        });
+        return;
+      }
     }
     setInitialized(true);
   }, []);
@@ -34,23 +91,74 @@ function App() {
     }
   }, [sets, initialized]);
 
+  const resetEditor = () => {
+    setTitle("");
+    setCards([]);
+    setNewKey("");
+    setNewValue("");
+    setEditingSetIndex(null);
+    setStudySettings(createDefaultStudySettings());
+  };
+
+  const openCreateSet = () => {
+    resetEditor();
+    setCurrentSet("new");
+  };
+
+  const closeEditor = () => {
+    resetEditor();
+    setCurrentSet(null);
+    setStudyMode(false);
+  };
+
   const createSet = () => {
+    if (!initialized) {
+      setModalMessage(
+        "Saving is disabled while unreadable saved data is being preserved. " +
+          "Reload Fliplet and choose “Back up and reset” to continue."
+      );
+      return;
+    }
+
     if (!title.trim() || cards.length === 0) {
       setModalMessage("Please add a title and at least one card before saving.");
       return;
     }
-    const newSet = { title: title.trim(), cards: [...cards] };
-    setSets((prev) => [...prev, newSet]);
-    // reset
-    setTitle("");
-    setCards([]);
+
+    const settingsError = validateStudySettings(cards, studySettings);
+    if (settingsError) {
+      setModalMessage(settingsError);
+      return;
+    }
+
+    const savedSet = {
+      formatVersion: 1,
+      title: title.trim(),
+      cards: [...cards],
+      study: normalizeStudySettings(studySettings)
+    };
+    const wasEditing = editingSetIndex !== null;
+
+    setSets((prev) =>
+      wasEditing
+        ? prev.map((set, index) =>
+            index === editingSetIndex ? savedSet : set
+          )
+        : [...prev, savedSet]
+    );
+    resetEditor();
     setCurrentSet(null);
-    setModalMessage("Set saved successfully!");
+    setModalMessage(
+      wasEditing ? "Set updated successfully!" : "Set saved successfully!"
+    );
   };
 
   const addCard = () => {
     if (!newKey.trim() || !newValue.trim()) return;
-    setCards((prev) => [...prev, { key: newKey.trim(), value: newValue.trim() }]);
+    setCards((prev) => [
+      ...prev,
+      { front: newKey.trim(), back: newValue.trim() }
+    ]);
     setNewKey("");
     setNewValue("");
   };
@@ -64,23 +172,37 @@ function App() {
     reader.onload = (e) => {
       try {
         const importedCards = JSON.parse(e.target.result);
-        if (Array.isArray(importedCards)) {
-          setCards(importedCards);
-          setModalMessage(`Imported ${importedCards.length} cards successfully.`);
-        } else {
-          setModalMessage("JSON must be an array of cards");
+        const importedDeck = normalizeDeck(importedCards, {
+          title,
+          study: studySettings
+        });
+
+        setCards(importedDeck.cards);
+        if (isDeckEnvelope(importedCards)) {
+          if (importedDeck.title) setTitle(importedDeck.title);
+          setStudySettings(importedDeck.study);
         }
+        setModalMessage(
+          "Imported " + importedDeck.cards.length + " cards successfully."
+        );
       } catch (err) {
-        setModalMessage("Invalid JSON");
+        setModalMessage("Could not import JSON: " + err.message);
       }
+      event.target.value = "";
     };
     reader.readAsText(file);
   };
 
   const startStudy = (setIndex) => {
     const set = sets[setIndex];
+    const settingsError = validateStudySettings(set.cards, set.study);
+    if (settingsError) {
+      setModalMessage(settingsError);
+      return;
+    }
+
     setCurrentSet(set);
-    const shuffled = [...set.cards].sort(() => Math.random() - 0.5);
+    const shuffled = shuffleArray(set.cards);
     setQueue(shuffled);
     setCurrentCard(shuffled[0]);
     setStudyMode(true);
@@ -88,16 +210,18 @@ function App() {
     setWrong(0);
     setSelectedAnswer(null);
 
-    // unique answers fixed once per set
-    const uniqueValues = Array.from(new Set(set.cards.map((c) => c.value)));
-    setStudyOptions(uniqueValues);
+    setStudyOptions(
+      buildStudyOptions(set.cards, shuffled[0], set.study)
+    );
   };
 
   const editSet = (setIndex) => {
     const set = sets[setIndex];
     setCurrentSet("new");
     setTitle(set.title);
-    setCards(set.cards);
+    setCards([...set.cards]);
+    setStudySettings(normalizeStudySettings(set.study));
+    setEditingSetIndex(setIndex);
   };
 
   const deleteSet = (setIndex) => {
@@ -112,8 +236,8 @@ function App() {
   };
 
   const submitAnswer = () => {
-    if (!selectedAnswer) return;
-    if (selectedAnswer === currentCard.value) {
+    if (selectedAnswer === null) return;
+    if (selectedAnswer === currentCard.back) {
       setCorrect((c) => c + 1);
       nextCard(queue.slice(1));
     } else {
@@ -124,14 +248,20 @@ function App() {
       newQueue.splice(insertIndex, 0, currentCard);
       nextCard(newQueue);
 
-      setModalMessage(`Wrong\nCorrect answer: ${currentCard.value}`);
+      setModalMessage("Wrong\nCorrect answer: " + currentCard.back);
     }
     setSelectedAnswer(null);
   };
 
   const nextCard = (newQueue) => {
+    const next = newQueue[0] || null;
     setQueue(newQueue);
-    setCurrentCard(newQueue[0] || null);
+    setCurrentCard(next);
+    setStudyOptions(
+      next && currentSet
+        ? buildStudyOptions(currentSet.cards, next, currentSet.study)
+        : []
+    );
   };
 
   // Simple modal
@@ -188,7 +318,7 @@ function App() {
                   border: "none"
                 }}
               >
-                Yes
+                {message.confirmLabel || "Yes"}
               </button>
               <button
                 onClick={onClose}
@@ -199,7 +329,7 @@ function App() {
                   border: "none"
                 }}
               >
-                No
+                {message.cancelLabel || "No"}
               </button>
             </div>
           )}
@@ -223,7 +353,7 @@ function App() {
           <h1>My Flashcard Sets</h1>
           <div style={{ display: "flex", gap: "20px", flexWrap: "wrap" }}>
             <div
-              onClick={() => setCurrentSet("new")}
+              onClick={openCreateSet}
               style={{
                 border: "2px dashed #888",
                 padding: "20px",
@@ -267,6 +397,7 @@ function App() {
                   >
                     <button
                       onClick={() => editSet(i)}
+                      aria-label={"Edit " + s.title}
                       style={{
                         background: "none",
                         border: "none",
@@ -278,6 +409,7 @@ function App() {
                     </button>
                     <button
                       onClick={() => deleteSet(i)}
+                      aria-label={"Delete " + s.title}
                       style={{
                         background: "none",
                         border: "none",
@@ -296,10 +428,7 @@ function App() {
       ) : currentSet === "new" ? (
         <div>
           <button
-            onClick={() => {
-              setCurrentSet(null);
-              setStudyMode(false);
-            }}
+            onClick={closeEditor}
             style={{
               backgroundColor: "#4caf50",
               padding: "6px 12px",
@@ -312,9 +441,10 @@ function App() {
           >
             Back
           </button>
-          <h1>Create New Set</h1>
+          <h1>{editingSetIndex === null ? "Create New Set" : "Edit Set"}</h1>
           <input
             type="text"
+            aria-label="Set title"
             placeholder="Set Title"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
@@ -329,10 +459,162 @@ function App() {
             }}
           />
 
+          <fieldset
+            style={{
+              border: "1px solid #444",
+              borderRadius: "8px",
+              padding: "16px",
+              margin: "14px 0 20px"
+            }}
+          >
+            <legend style={{ padding: "0 8px", fontWeight: "bold" }}>
+              Answer choices
+            </legend>
+
+            <label style={{ display: "block", marginBottom: "10px" }}>
+              <input
+                type="radio"
+                name="choice-mode"
+                value={CHOICE_MODES.ALL}
+                checked={studySettings.choiceMode === CHOICE_MODES.ALL}
+                onChange={(e) =>
+                  setStudySettings((current) => ({
+                    ...current,
+                    choiceMode: e.target.value
+                  }))
+                }
+              />{" "}
+              All unique answers
+              <small
+                style={{ display: "block", color: "#bbb", marginLeft: "22px" }}
+              >
+                Show every distinct back value on every card.
+              </small>
+            </label>
+
+            <label style={{ display: "block", marginBottom: "10px" }}>
+              <input
+                type="radio"
+                name="choice-mode"
+                value={CHOICE_MODES.RANDOM}
+                checked={studySettings.choiceMode === CHOICE_MODES.RANDOM}
+                onChange={(e) =>
+                  setStudySettings((current) => ({
+                    ...current,
+                    choiceMode: e.target.value
+                  }))
+                }
+              />{" "}
+              Random subset
+              <small
+                style={{ display: "block", color: "#bbb", marginLeft: "22px" }}
+              >
+                Shows up to your chosen count, always including the correct
+                answer with unique distractors.
+              </small>
+            </label>
+
+            {studySettings.choiceMode === CHOICE_MODES.RANDOM && (
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "10px",
+                  margin: "0 0 12px 22px"
+                }}
+              >
+                Choices per card
+                <input
+                  type="number"
+                  min="2"
+                  step="1"
+                  value={studySettings.choiceCount}
+                  onChange={(e) =>
+                    setStudySettings((current) => ({
+                      ...current,
+                      choiceCount: e.target.value
+                    }))
+                  }
+                  style={{
+                    width: "70px",
+                    padding: "6px",
+                    backgroundColor: "#1e1e1e",
+                    color: "#f5f5f5",
+                    border: "1px solid #555"
+                  }}
+                />
+              </label>
+            )}
+
+            <label style={{ display: "block", marginBottom: "10px" }}>
+              <input
+                type="radio"
+                name="choice-mode"
+                value={CHOICE_MODES.FIXED}
+                checked={studySettings.choiceMode === CHOICE_MODES.FIXED}
+                onChange={(e) =>
+                  setStudySettings((current) => ({
+                    ...current,
+                    choiceMode: e.target.value
+                  }))
+                }
+              />{" "}
+              Fixed choices
+              <small
+                style={{ display: "block", color: "#bbb", marginLeft: "22px" }}
+              >
+                Use the same custom answer bank on every card.
+              </small>
+            </label>
+
+            {studySettings.choiceMode === CHOICE_MODES.FIXED && (
+              <label style={{ display: "block", margin: "0 0 12px 22px" }}>
+                One choice per line
+                <textarea
+                  aria-label="Fixed choices"
+                  value={studySettings.choices.join("\n")}
+                  onChange={(e) =>
+                    setStudySettings((current) => ({
+                      ...current,
+                      choices: e.target.value.split(/\r?\n/)
+                    }))
+                  }
+                  rows="5"
+                  placeholder={"Hit\nStand\nDouble\nSplit\nSurrender"}
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    boxSizing: "border-box",
+                    marginTop: "6px",
+                    padding: "8px",
+                    backgroundColor: "#1e1e1e",
+                    color: "#f5f5f5",
+                    border: "1px solid #555"
+                  }}
+                />
+              </label>
+            )}
+
+            <label style={{ display: "block" }}>
+              <input
+                type="checkbox"
+                checked={studySettings.shuffleChoices}
+                onChange={(e) =>
+                  setStudySettings((current) => ({
+                    ...current,
+                    shuffleChoices: e.target.checked
+                  }))
+                }
+              />{" "}
+              Shuffle answer positions for each card
+            </label>
+          </fieldset>
+
           <div style={{ display: "flex", gap: "10px", marginBottom: "10px" }}>
             <input
               type="text"
-              placeholder="Key"
+              aria-label="Card front"
+              placeholder="Front"
               value={newKey}
               onChange={(e) => setNewKey(e.target.value)}
               style={{
@@ -345,7 +627,8 @@ function App() {
             />
             <input
               type="text"
-              placeholder="Value"
+              aria-label="Card back"
+              placeholder="Back"
               value={newValue}
               onChange={(e) => setNewValue(e.target.value)}
               style={{
@@ -369,7 +652,14 @@ function App() {
             </button>
           </div>
 
-          <p style={{ marginTop: "20px" }}>Import flashcards from JSON file:</p>
+          <p style={{ marginTop: "20px", marginBottom: "4px" }}>
+            Replace cards from JSON:
+          </p>
+          <small style={{ display: "block", color: "#bbb", marginBottom: "8px" }}>
+            Supports compact front-to-back objects, complete deck files, and
+            legacy arrays. A complete deck also replaces the title and answer
+            settings.
+          </small>
           <input
             type="file"
             accept=".json"
@@ -385,10 +675,35 @@ function App() {
                   border: "1px solid #444",
                   padding: "5px",
                   marginBottom: "5px",
-                  backgroundColor: "#1e1e1e"
+                  backgroundColor: "#1e1e1e",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: "10px"
                 }}
               >
-                <strong>{c.key}</strong>: {c.value}
+                <span>
+                  <strong>{c.front}</strong>: {c.back}
+                </span>
+                <button
+                  type="button"
+                  aria-label={"Remove card " + (i + 1)}
+                  onClick={() =>
+                    setCards((current) =>
+                      current.filter((_, index) => index !== i)
+                    )
+                  }
+                  style={{
+                    backgroundColor: "#5c1f1f",
+                    color: "#fff",
+                    border: "1px solid #8b3333",
+                    borderRadius: "4px",
+                    padding: "4px 8px",
+                    cursor: "pointer"
+                  }}
+                >
+                  Remove
+                </button>
               </li>
             ))}
           </ul>
@@ -403,7 +718,7 @@ function App() {
               border: "none"
             }}
           >
-            Save Set
+            {editingSetIndex === null ? "Save Set" : "Save Changes"}
           </button>
         </div>
       ) : studyMode && currentCard ? (
@@ -450,7 +765,7 @@ function App() {
               backgroundColor: "#1e1e1e"
             }}
           >
-            {currentCard.key}
+            {currentCard.front}
           </div>
 
           {/* ANSWER GRID */}
@@ -467,7 +782,7 @@ function App() {
           >
             {studyOptions.map((value, i) => (
               <label
-                key={i}
+                key={value}
                 style={{
                   display: "flex",
                   alignItems: "center",
@@ -484,7 +799,7 @@ function App() {
               >
                 <input
                   type="radio"
-                  name={`answer-${currentCard.key}`}
+                  name="answer-choice"
                   value={value}
                   checked={selectedAnswer === value}
                   onChange={() => setSelectedAnswer(value)}
