@@ -5,6 +5,11 @@ beforeEach(() => {
   localStorage.clear();
 });
 
+afterEach(() => {
+  delete window.speechSynthesis;
+  delete window.SpeechSynthesisUtterance;
+});
+
 test("renders the set library", () => {
   render(<App />);
   expect(
@@ -83,4 +88,101 @@ test("offers a recoverable reset when saved data is unreadable", async () => {
     );
     expect(JSON.parse(localStorage.getItem("flashcardSets"))).toEqual([]);
   });
+});
+
+test("saves pronunciation settings with a deck", async () => {
+  render(<App />);
+
+  fireEvent.click(screen.getByText("+ Create"));
+  fireEvent.change(screen.getByLabelText("Set title"), {
+    target: { value: "Portuguese" }
+  });
+  fireEvent.click(
+    screen.getByRole("checkbox", {
+      name: "Enable text-to-speech for this set"
+    })
+  );
+  fireEvent.change(screen.getByLabelText("Pronunciation language"), {
+    target: { value: "pt-BR" }
+  });
+  fireEvent.change(screen.getByLabelText("Card front"), {
+    target: { value: "olá" }
+  });
+  fireEvent.change(screen.getByLabelText("Card back"), {
+    target: { value: "hello" }
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Add" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save Set" }));
+
+  await waitFor(() => {
+    const storedSets = JSON.parse(localStorage.getItem("flashcardSets"));
+    expect(storedSets[0].study.pronunciation).toEqual({
+      enabled: true,
+      language: "pt-BR",
+      side: "front",
+      autoPlay: false,
+      offlineOnly: true
+    });
+  });
+});
+
+test("speaks a card with an installed Brazilian Portuguese voice", async () => {
+  const localVoice = {
+    name: "Brazilian Portuguese",
+    lang: "pt-BR",
+    localService: true,
+    default: true
+  };
+  const speak = jest.fn();
+  const cancel = jest.fn();
+  Object.defineProperty(window, "speechSynthesis", {
+    configurable: true,
+    value: {
+      addEventListener: jest.fn(),
+      removeEventListener: jest.fn(),
+      getVoices: () => [localVoice],
+      speak,
+      cancel
+    }
+  });
+  Object.defineProperty(window, "SpeechSynthesisUtterance", {
+    configurable: true,
+    value: function SpeechSynthesisUtterance(text) {
+      this.text = text;
+    }
+  });
+  localStorage.setItem(
+    "flashcardSets",
+    JSON.stringify([
+      {
+        title: "Portuguese",
+        cards: [{ front: "olá / oi", back: "hello" }],
+        study: {
+          choiceMode: "all",
+          pronunciation: {
+            enabled: true,
+            language: "pt-BR",
+            side: "front",
+            autoPlay: false,
+            offlineOnly: true
+          }
+        }
+      }
+    ])
+  );
+
+  render(<App />);
+  fireEvent.click(await screen.findByText("Portuguese"));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Speak card pronunciation" })
+  );
+
+  expect(cancel).toHaveBeenCalled();
+  expect(speak).toHaveBeenCalledWith(
+    expect.objectContaining({
+      text: "olá, oi",
+      lang: "pt-BR",
+      voice: localVoice
+    })
+  );
 });

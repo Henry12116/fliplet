@@ -13,7 +13,14 @@
     "choiceMode": "random",
     "choiceCount": 4,
     "choices": [],
-    "shuffleChoices": true
+    "shuffleChoices": true,
+    "pronunciation": {
+      "enabled": true,
+      "language": "pt-BR",
+      "side": "front",
+      "autoPlay": false,
+      "offlineOnly": true
+    }
   },
   "cards": {
     "o / a / os / as": "the (masculine/feminine; singular/plural)",

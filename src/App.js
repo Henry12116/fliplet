@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from "react";
+import React, { useCallback, useState, useEffect } from "react";
 import {
   buildStudyOptions,
   CHOICE_MODES,
+  DEFAULT_PRONUNCIATION_SETTINGS,
   DEFAULT_STUDY_SETTINGS,
   isDeckEnvelope,
   normalizeDeck,
@@ -9,11 +10,13 @@ import {
   shuffleArray,
   validateStudySettings
 } from "./deckUtils";
+import { findPronunciationVoice, prepareSpeechText } from "./speechUtils";
 
 const createDefaultStudySettings = () => ({
   ...DEFAULT_STUDY_SETTINGS,
   choiceMode: CHOICE_MODES.RANDOM,
-  choices: []
+  choices: [],
+  pronunciation: { ...DEFAULT_PRONUNCIATION_SETTINGS }
 });
 
 function App() {
@@ -37,6 +40,57 @@ function App() {
   const [studySettings, setStudySettings] = useState(
     createDefaultStudySettings
   );
+  const [speechVoices, setSpeechVoices] = useState([]);
+  const [speechVoicesLoaded, setSpeechVoicesLoaded] = useState(false);
+  const [offlineStatus, setOfflineStatus] = useState(() =>
+    typeof window !== "undefined" && window.__flipletOfflineStatus
+      ? window.__flipletOfflineStatus
+      : { status: "preparing", message: "" }
+  );
+
+  useEffect(() => {
+    if (
+      typeof window === "undefined" ||
+      !window.speechSynthesis ||
+      typeof window.speechSynthesis.getVoices !== "function"
+    ) {
+      return undefined;
+    }
+
+    const speechSynthesis = window.speechSynthesis;
+    const updateVoices = () => {
+      setSpeechVoices(Array.from(speechSynthesis.getVoices() || []));
+      setSpeechVoicesLoaded(true);
+    };
+
+    updateVoices();
+    if (typeof speechSynthesis.addEventListener === "function") {
+      speechSynthesis.addEventListener("voiceschanged", updateVoices);
+      return () =>
+        speechSynthesis.removeEventListener("voiceschanged", updateVoices);
+    }
+
+    const previousHandler = speechSynthesis.onvoiceschanged;
+    speechSynthesis.onvoiceschanged = updateVoices;
+    return () => {
+      speechSynthesis.onvoiceschanged = previousHandler;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "production" || typeof window === "undefined") {
+      return undefined;
+    }
+
+    const updateOfflineStatus = (event) => setOfflineStatus(event.detail);
+    if (window.__flipletOfflineStatus) {
+      setOfflineStatus(window.__flipletOfflineStatus);
+    }
+    window.addEventListener("fliplet-offline-status", updateOfflineStatus);
+
+    return () =>
+      window.removeEventListener("fliplet-offline-status", updateOfflineStatus);
+  }, []);
 
   // Load sets from localStorage once
   useEffect(() => {
@@ -264,6 +318,98 @@ function App() {
     );
   };
 
+  const updatePronunciationSetting = (field, value) => {
+    setStudySettings((current) => ({
+      ...current,
+      pronunciation: {
+        ...DEFAULT_PRONUNCIATION_SETTINGS,
+        ...(current.pronunciation || {}),
+        [field]: value
+      }
+    }));
+  };
+
+  const speakCard = useCallback(
+    (card, notifyOnFailure = true) => {
+      if (!card || !currentSet || currentSet === "new") return false;
+
+      const pronunciation = normalizeStudySettings(
+        currentSet.study
+      ).pronunciation;
+      if (!pronunciation.enabled) return false;
+
+      if (
+        typeof window === "undefined" ||
+        !window.speechSynthesis ||
+        typeof window.SpeechSynthesisUtterance !== "function"
+      ) {
+        if (notifyOnFailure) {
+          setModalMessage(
+            "Text-to-speech is not supported by this browser."
+          );
+        }
+        return false;
+      }
+
+      const voice = findPronunciationVoice(
+        speechVoices,
+        pronunciation.language,
+        pronunciation.offlineOnly
+      );
+      if (!voice && pronunciation.offlineOnly) {
+        if (notifyOnFailure) {
+          setModalMessage(
+            "No offline " + pronunciation.language +
+              " voice is installed on this device. Install one in your " +
+              "device's language or accessibility settings before traveling."
+          );
+        }
+        return false;
+      }
+
+      const text = prepareSpeechText(card.front);
+      if (!text) return false;
+
+      const utterance = new window.SpeechSynthesisUtterance(text);
+      utterance.lang = pronunciation.language;
+      if (voice) utterance.voice = voice;
+
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(utterance);
+      return true;
+    },
+    [currentSet, speechVoices]
+  );
+
+  useEffect(() => {
+    if (
+      !studyMode ||
+      !currentCard ||
+      !currentSet ||
+      currentSet === "new" ||
+      modalMessage
+    ) {
+      return undefined;
+    }
+
+    const pronunciation = normalizeStudySettings(
+      currentSet.study
+    ).pronunciation;
+    if (!pronunciation.enabled || !pronunciation.autoPlay) return undefined;
+
+    speakCard(currentCard, false);
+    return undefined;
+  }, [currentCard, currentSet, modalMessage, speakCard, studyMode]);
+
+  useEffect(
+    () => () => {
+      if (typeof window !== "undefined" && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+    },
+    [currentCard, modalMessage, studyMode]
+  );
+
   // Simple modal
   const Modal = ({ message, onClose }) => {
     if (!message) return null;
@@ -338,6 +484,53 @@ function App() {
     );
   };
 
+  const editorPronunciation = {
+    ...DEFAULT_PRONUNCIATION_SETTINGS,
+    ...(studySettings.pronunciation || {})
+  };
+  const activePronunciation =
+    currentSet && currentSet !== "new"
+      ? normalizeStudySettings(currentSet.study).pronunciation
+      : DEFAULT_PRONUNCIATION_SETTINGS;
+  const speechSupported =
+    typeof window !== "undefined" &&
+    Boolean(window.speechSynthesis) &&
+    typeof window.SpeechSynthesisUtterance === "function";
+  const activePronunciationVoice = findPronunciationVoice(
+    speechVoices,
+    activePronunciation.language,
+    activePronunciation.offlineOnly
+  );
+  const pronunciationStatus = (pronunciation) => {
+    if (!pronunciation.enabled) return "Pronunciation is off.";
+    if (!pronunciation.language.trim()) {
+      return "Enter a language tag to check for an installed voice.";
+    }
+    if (!speechSupported) {
+      return "Text-to-speech is not supported by this browser.";
+    }
+    if (!speechVoicesLoaded) return "Checking installed voices...";
+
+    const voice = findPronunciationVoice(
+      speechVoices,
+      pronunciation.language,
+      pronunciation.offlineOnly
+    );
+    if (voice) {
+      return (
+        (voice.localService ? "Offline voice ready: " : "Voice ready: ") +
+        voice.name +
+        " (" +
+        voice.lang +
+        ")"
+      );
+    }
+
+    return pronunciation.offlineOnly
+      ? "No offline " + pronunciation.language + " voice is installed."
+      : "No matching voice was reported; the browser may use its default.";
+  };
+
   return (
     <div
       style={{
@@ -351,6 +544,26 @@ function App() {
       {!currentSet && !studyMode ? (
         <div>
           <h1>My Flashcard Sets</h1>
+          {process.env.NODE_ENV === "production" && (
+            <p
+              role="status"
+              style={{
+                color:
+                  offlineStatus.status === "ready"
+                    ? "#8bd18b"
+                    : offlineStatus.status === "preparing"
+                    ? "#e7c36a"
+                    : "#ff8a80",
+                marginTop: "-8px"
+              }}
+            >
+              {offlineStatus.status === "ready"
+                ? "Offline ready"
+                : offlineStatus.status === "preparing"
+                ? "Preparing offline mode…"
+                : offlineStatus.message || "Offline mode is unavailable."}
+            </p>
+          )}
           <div style={{ display: "flex", gap: "20px", flexWrap: "wrap" }}>
             <div
               onClick={openCreateSet}
@@ -610,6 +823,106 @@ function App() {
             </label>
           </fieldset>
 
+          <fieldset
+            style={{
+              border: "1px solid #444",
+              borderRadius: "8px",
+              padding: "16px",
+              margin: "14px 0 20px"
+            }}
+          >
+            <legend style={{ padding: "0 8px", fontWeight: "bold" }}>
+              Pronunciation
+            </legend>
+
+            <label style={{ display: "block", marginBottom: "10px" }}>
+              <input
+                type="checkbox"
+                checked={editorPronunciation.enabled}
+                onChange={(event) =>
+                  updatePronunciationSetting("enabled", event.target.checked)
+                }
+              />{" "}
+              Enable text-to-speech for this set
+            </label>
+
+            {editorPronunciation.enabled && (
+              <div style={{ marginLeft: "22px" }}>
+                <label style={{ display: "block", marginBottom: "12px" }}>
+                  Language
+                  <input
+                    type="text"
+                    aria-label="Pronunciation language"
+                    value={editorPronunciation.language}
+                    onChange={(event) =>
+                      updatePronunciationSetting(
+                        "language",
+                        event.target.value
+                      )
+                    }
+                    placeholder="pt-BR"
+                    style={{
+                      display: "block",
+                      width: "140px",
+                      marginTop: "6px",
+                      padding: "6px",
+                      backgroundColor: "#1e1e1e",
+                      color: "#f5f5f5",
+                      border: "1px solid #555"
+                    }}
+                  />
+                  <small style={{ display: "block", color: "#bbb" }}>
+                    Use a language tag such as pt-BR, es-MX, or fr-FR.
+                  </small>
+                </label>
+
+                <label style={{ display: "block", marginBottom: "10px" }}>
+                  <input
+                    type="checkbox"
+                    checked={editorPronunciation.autoPlay}
+                    onChange={(event) =>
+                      updatePronunciationSetting(
+                        "autoPlay",
+                        event.target.checked
+                      )
+                    }
+                  />{" "}
+                  Speak automatically when each card appears
+                </label>
+
+                <label style={{ display: "block", marginBottom: "10px" }}>
+                  <input
+                    type="checkbox"
+                    checked={editorPronunciation.offlineOnly}
+                    onChange={(event) =>
+                      updatePronunciationSetting(
+                        "offlineOnly",
+                        event.target.checked
+                      )
+                    }
+                  />{" "}
+                  Only use a voice installed on this device
+                </label>
+
+                <small
+                  role="status"
+                  style={{
+                    display: "block",
+                    color: findPronunciationVoice(
+                      speechVoices,
+                      editorPronunciation.language,
+                      editorPronunciation.offlineOnly
+                    )
+                      ? "#8bd18b"
+                      : "#e7c36a"
+                  }}
+                >
+                  {pronunciationStatus(editorPronunciation)}
+                </small>
+              </div>
+            )}
+          </fieldset>
+
           <div style={{ display: "flex", gap: "10px", marginBottom: "10px" }}>
             <input
               type="text"
@@ -657,7 +970,7 @@ function App() {
           </p>
           <small style={{ display: "block", color: "#bbb", marginBottom: "8px" }}>
             Supports compact front-to-back objects, complete deck files, and
-            legacy arrays. A complete deck also replaces the title and answer
+            legacy arrays. A complete deck also replaces the title and study
             settings.
           </small>
           <input
@@ -765,7 +1078,43 @@ function App() {
               backgroundColor: "#1e1e1e"
             }}
           >
-            {currentCard.front}
+            <div>{currentCard.front}</div>
+            {activePronunciation.enabled && (
+              <button
+                type="button"
+                aria-label="Speak card pronunciation"
+                onClick={() => speakCard(currentCard)}
+                style={{
+                  marginTop: "16px",
+                  padding: "7px 14px",
+                  backgroundColor: "#333",
+                  color: "#fff",
+                  border: "1px solid #777",
+                  borderRadius: "6px",
+                  cursor: "pointer",
+                  fontSize: "0.9rem"
+                }}
+              >
+                Speak
+              </button>
+            )}
+            {activePronunciation.enabled &&
+              (!speechSupported ||
+                !speechVoicesLoaded ||
+                (activePronunciation.offlineOnly &&
+                  !activePronunciationVoice)) && (
+                <small
+                  role="status"
+                  style={{
+                    display: "block",
+                    marginTop: "10px",
+                    color: "#e7c36a",
+                    fontSize: "0.8rem"
+                  }}
+                >
+                  {pronunciationStatus(activePronunciation)}
+                </small>
+              )}
           </div>
 
           {/* ANSWER GRID */}

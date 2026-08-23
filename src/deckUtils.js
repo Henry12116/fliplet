@@ -6,11 +6,24 @@ export const CHOICE_MODES = {
   FIXED: "fixed"
 };
 
+export const PRONUNCIATION_SIDES = {
+  FRONT: "front"
+};
+
+export const DEFAULT_PRONUNCIATION_SETTINGS = {
+  enabled: false,
+  language: "",
+  side: PRONUNCIATION_SIDES.FRONT,
+  autoPlay: false,
+  offlineOnly: true
+};
+
 export const DEFAULT_STUDY_SETTINGS = {
   choiceMode: CHOICE_MODES.ALL,
   choiceCount: 4,
   choices: [],
-  shuffleChoices: true
+  shuffleChoices: true,
+  pronunciation: DEFAULT_PRONUNCIATION_SETTINGS
 };
 
 const isRecord = (value) =>
@@ -18,6 +31,9 @@ const isRecord = (value) =>
 
 const hasOwn = (value, key) =>
   Object.prototype.hasOwnProperty.call(value, key);
+
+const isPlausibleLanguageTag = (value) =>
+  /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(value);
 
 const cleanText = (value, label) => {
   if (!["string", "number", "boolean"].includes(typeof value)) {
@@ -103,6 +119,32 @@ export const normalizeStudySettings = (rawStudy = {}) => {
     : Array.isArray(candidate.fixedChoices)
       ? candidate.fixedChoices
       : [];
+  const pronunciationCandidate = isRecord(candidate.pronunciation)
+    ? candidate.pronunciation
+    : {};
+  const pronunciation = {
+    enabled:
+      typeof pronunciationCandidate.enabled === "boolean"
+        ? pronunciationCandidate.enabled
+        : DEFAULT_PRONUNCIATION_SETTINGS.enabled,
+    language:
+      typeof pronunciationCandidate.language === "string"
+        ? pronunciationCandidate.language.trim()
+        : DEFAULT_PRONUNCIATION_SETTINGS.language,
+    side: Object.values(PRONUNCIATION_SIDES).includes(
+      pronunciationCandidate.side
+    )
+      ? pronunciationCandidate.side
+      : DEFAULT_PRONUNCIATION_SETTINGS.side,
+    autoPlay:
+      typeof pronunciationCandidate.autoPlay === "boolean"
+        ? pronunciationCandidate.autoPlay
+        : DEFAULT_PRONUNCIATION_SETTINGS.autoPlay,
+    offlineOnly:
+      typeof pronunciationCandidate.offlineOnly === "boolean"
+        ? pronunciationCandidate.offlineOnly
+        : DEFAULT_PRONUNCIATION_SETTINGS.offlineOnly
+  };
 
   return {
     choiceMode,
@@ -111,7 +153,8 @@ export const normalizeStudySettings = (rawStudy = {}) => {
     shuffleChoices:
       typeof candidate.shuffleChoices === "boolean"
         ? candidate.shuffleChoices
-        : DEFAULT_STUDY_SETTINGS.shuffleChoices
+        : DEFAULT_STUDY_SETTINGS.shuffleChoices,
+    pronunciation
   };
 };
 
@@ -202,6 +245,68 @@ export const validateStudySettings = (cards, rawStudy = {}) => {
     typeof rawStudy.shuffleChoices !== "boolean"
   ) {
     return "Shuffle choices must be true or false.";
+  }
+
+  if (
+    hasOwn(rawStudy, "pronunciation") &&
+    !isRecord(rawStudy.pronunciation)
+  ) {
+    return "Pronunciation settings must be an object.";
+  }
+
+  if (isRecord(rawStudy.pronunciation)) {
+    const pronunciation = rawStudy.pronunciation;
+
+    if (
+      hasOwn(pronunciation, "enabled") &&
+      typeof pronunciation.enabled !== "boolean"
+    ) {
+      return "Pronunciation enabled must be true or false.";
+    }
+
+    if (
+      hasOwn(pronunciation, "language") &&
+      typeof pronunciation.language !== "string"
+    ) {
+      return "Pronunciation language must be text.";
+    }
+
+    if (
+      hasOwn(pronunciation, "side") &&
+      !Object.values(PRONUNCIATION_SIDES).includes(pronunciation.side)
+    ) {
+      return "Pronunciation side must be front.";
+    }
+
+    if (
+      hasOwn(pronunciation, "autoPlay") &&
+      typeof pronunciation.autoPlay !== "boolean"
+    ) {
+      return "Pronunciation autoplay must be true or false.";
+    }
+
+    if (
+      hasOwn(pronunciation, "offlineOnly") &&
+      typeof pronunciation.offlineOnly !== "boolean"
+    ) {
+      return "Offline-only pronunciation must be true or false.";
+    }
+
+    if (pronunciation.enabled === true) {
+      const language =
+        typeof pronunciation.language === "string"
+          ? pronunciation.language.trim()
+          : "";
+
+      if (!language || !isPlausibleLanguageTag(language)) {
+        return "Enabled pronunciation needs a valid language tag, such as pt-BR.";
+      }
+
+      const side = pronunciation.side ?? DEFAULT_PRONUNCIATION_SETTINGS.side;
+      if (!Object.values(PRONUNCIATION_SIDES).includes(side)) {
+        return "Pronunciation side must be front.";
+      }
+    }
   }
 
   const study = normalizeStudySettings(rawStudy);

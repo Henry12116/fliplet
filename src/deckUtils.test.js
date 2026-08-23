@@ -1,8 +1,11 @@
 import {
   buildStudyOptions,
   CHOICE_MODES,
+  DEFAULT_PRONUNCIATION_SETTINGS,
+  FORMAT_VERSION,
   normalizeDeck,
   normalizeCards,
+  PRONUNCIATION_SIDES,
   validateStudySettings
 } from "./deckUtils";
 
@@ -32,7 +35,84 @@ test("legacy decks default to all unique answers", () => {
   });
 
   expect(deck.study.choiceMode).toBe(CHOICE_MODES.ALL);
+  expect(deck.study.pronunciation).toEqual(
+    DEFAULT_PRONUNCIATION_SETTINGS
+  );
   expect(deck.cards[0]).toEqual({ front: "question", back: "answer" });
+});
+
+test("normalizes explicit pronunciation settings", () => {
+  const deck = normalizeDeck({
+    formatVersion: FORMAT_VERSION,
+    cards: { casa: "house" },
+    study: {
+      pronunciation: {
+        enabled: true,
+        language: " pt-BR ",
+        side: PRONUNCIATION_SIDES.FRONT,
+        autoPlay: true,
+        offlineOnly: false
+      }
+    }
+  });
+
+  expect(deck.formatVersion).toBe(1);
+  expect(deck.study.pronunciation).toEqual({
+    enabled: true,
+    language: "pt-BR",
+    side: "front",
+    autoPlay: true,
+    offlineOnly: false
+  });
+});
+
+test("validates explicit pronunciation fields strictly", () => {
+  const makeDeck = (pronunciation) => ({
+    formatVersion: 1,
+    cards: { casa: "house" },
+    study: { pronunciation }
+  });
+
+  expect(() => normalizeDeck(makeDeck(true))).toThrow(
+    /pronunciation settings must be an object/i
+  );
+  expect(() =>
+    normalizeDeck(makeDeck({ enabled: "true" }))
+  ).toThrow(/enabled must be true or false/i);
+  expect(() =>
+    normalizeDeck(makeDeck({ language: 123 }))
+  ).toThrow(/language must be text/i);
+  expect(() =>
+    normalizeDeck(makeDeck({ side: "back" }))
+  ).toThrow(/side must be front/i);
+  expect(() =>
+    normalizeDeck(makeDeck({ autoPlay: "yes" }))
+  ).toThrow(/autoplay must be true or false/i);
+  expect(() =>
+    normalizeDeck(makeDeck({ offlineOnly: 1 }))
+  ).toThrow(/offline-only pronunciation must be true or false/i);
+});
+
+test("enabled pronunciation requires a plausible language tag", () => {
+  const makeDeck = (language) => ({
+    formatVersion: 1,
+    cards: { casa: "house" },
+    study: {
+      pronunciation: { enabled: true, language }
+    }
+  });
+
+  expect(() => normalizeDeck(makeDeck(""))).toThrow(
+    /valid language tag/i
+  );
+  expect(() => normalizeDeck(makeDeck("portuguese"))).toThrow(
+    /valid language tag/i
+  );
+  expect(normalizeDeck(makeDeck("pt-BR")).study.pronunciation).toMatchObject({
+    enabled: true,
+    language: "pt-BR",
+    side: PRONUNCIATION_SIDES.FRONT
+  });
 });
 
 test("recognizes cards-only envelopes without stealing scalar compact keys", () => {
