@@ -77,14 +77,3 @@ export const getPersonalSets = (sets) =>
   sets
     .filter((set) => !isBundledDeck(set))
     .map((set) => ({ ...set, [PERSONAL_DECK_FLAG]: true }));
-
-export const getUniqueDeckAdditions = (sets, additions) => {
-  const fingerprints = new Set(sets.map(deckFingerprint));
-
-  return additions.filter((deck) => {
-    const fingerprint = deckFingerprint(deck);
-    if (fingerprints.has(fingerprint)) return false;
-    fingerprints.add(fingerprint);
-    return true;
-  });
-};

@@ -14,7 +14,6 @@ import {
 import {
   buildSetLibrary,
   getPersonalSets,
-  getUniqueDeckAdditions,
   isBundledDeck
 } from "./libraryUtils";
 import { findPronunciationVoice, prepareSpeechText } from "./speechUtils";
@@ -25,18 +24,6 @@ const createDefaultStudySettings = () => ({
   choices: [],
   pronunciation: { ...DEFAULT_PRONUNCIATION_SETTINGS }
 });
-
-const readFileAsText = (file) =>
-  new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (event) => resolve(event.target.result);
-    reader.onerror = () =>
-      reject(reader.error || new Error("The file could not be read."));
-    reader.readAsText(file);
-  });
-
-const fallbackTitleFromFile = (file) =>
-  file.name.replace(/\.json$/i, "").replace(/[-_]+/g, " ").trim();
 
 const hasDeckDetails = (deck) =>
   Boolean(
@@ -298,65 +285,6 @@ function App() {
       event.target.value = "";
     };
     reader.readAsText(file);
-  };
-
-  const uploadDecks = async (event) => {
-    const files = Array.from(event.target.files || []);
-    event.target.value = "";
-    if (files.length === 0) return;
-
-    if (!initialized) {
-      setModalMessage(
-        "Uploading is disabled while unreadable saved data is being preserved. " +
-          "Resolve the saved-data prompt first."
-      );
-      return;
-    }
-
-    const importedDecks = [];
-    const failures = [];
-
-    for (const file of files) {
-      try {
-        const rawDeck = JSON.parse(await readFileAsText(file));
-        importedDecks.push(
-          normalizeDeck(rawDeck, {
-            title: fallbackTitleFromFile(file),
-            study: createDefaultStudySettings()
-          })
-        );
-      } catch (error) {
-        failures.push(file.name + ": " + error.message);
-      }
-    }
-
-    const uniqueDecks = getUniqueDeckAdditions(sets, importedDecks);
-    if (uniqueDecks.length > 0) {
-      setSets((current) => [
-        ...current,
-        ...getUniqueDeckAdditions(current, uniqueDecks)
-      ]);
-    }
-
-    const duplicateCount = importedDecks.length - uniqueDecks.length;
-    const message = [];
-    if (uniqueDecks.length > 0) {
-      message.push(
-        "Added " + uniqueDecks.length +
-          (uniqueDecks.length === 1 ? " deck." : " decks.")
-      );
-    }
-    if (duplicateCount > 0) {
-      message.push(
-        "Skipped " + duplicateCount +
-          (duplicateCount === 1 ? " duplicate." : " duplicates.")
-      );
-    }
-    if (failures.length > 0) {
-      message.push("Could not add:\n" + failures.join("\n"));
-    }
-
-    setModalMessage(message.join("\n\n") || "No decks were added.");
   };
 
   const startStudy = (setIndex) => {
@@ -703,28 +631,6 @@ function App() {
             >
               + Create
             </div>
-            <label
-              style={{
-                border: "2px dashed #888",
-                padding: "20px",
-                cursor: initialized ? "pointer" : "not-allowed",
-                textAlign: "center",
-                width: "120px",
-                backgroundColor: "#1e1e1e",
-                opacity: initialized ? 1 : 0.6
-              }}
-            >
-              + Upload
-              <input
-                type="file"
-                aria-label="Upload deck JSON"
-                accept=".json,application/json"
-                multiple
-                disabled={!initialized}
-                onChange={uploadDecks}
-                style={{ display: "none" }}
-              />
-            </label>
             {sets.map((s, i) => (
               <div
                 key={s.bundledDeckId || i}

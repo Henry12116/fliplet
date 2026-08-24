@@ -3,7 +3,6 @@ import {
   buildSetLibrary,
   bundledDecks,
   getPersonalSets,
-  getUniqueDeckAdditions,
   isBundledDeck,
   PERSONAL_DECK_FLAG
 } from "./libraryUtils";
@@ -83,21 +82,7 @@ test("persists personal decks only", () => {
   expect(getPersonalSets([...bundledDecks, personal])).toEqual([personal]);
 });
 
-test("filters duplicates while keeping distinct uploaded decks", () => {
-  const existing = buildSetLibrary([]);
-  const duplicate = { ...bundledDecks[0] };
-  delete duplicate[BUNDLED_DECK_ID];
-  const additionLibrary = buildSetLibrary([
-    { title: "Uploaded", cards: { Front: "Back" } }
-  ]);
-  const addition = additionLibrary[additionLibrary.length - 1];
-
-  expect(getUniqueDeckAdditions(existing, [duplicate, addition])).toEqual([
-    addition
-  ]);
-});
-
-test("keeps a newly uploaded metadata-less built-in copy after reload", () => {
+test("keeps a personal metadata-less built-in copy after reload", () => {
   const builtIn = bundledDecks[0];
   const uploadedCopy = {
     formatVersion: builtIn.formatVersion,
@@ -105,11 +90,9 @@ test("keeps a newly uploaded metadata-less built-in copy after reload", () => {
     cards: builtIn.cards,
     study: builtIn.study
   };
-  const additions = getUniqueDeckAdditions(bundledDecks, [uploadedCopy]);
-  const savedSets = getPersonalSets([...bundledDecks, ...additions]);
+  const savedSets = getPersonalSets([...bundledDecks, uploadedCopy]);
   const reloaded = buildSetLibrary(savedSets);
 
-  expect(additions).toHaveLength(1);
   expect(savedSets[0][PERSONAL_DECK_FLAG]).toBe(true);
   expect(
     reloaded.filter((deck) => deck.title === builtIn.title)

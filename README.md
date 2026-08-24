@@ -14,9 +14,9 @@ part of the deployed app; no browser upload is needed for repository decks.
 These decks are labeled **Built in** and stay read-only in the app; edit their
 JSON source to update them for everyone.
 
-The **Upload** control adds editable personal decks. Uploads remain local to
-that browser; they do not write files into this repository or publish decks for
-other users.
+To import an editable personal deck, choose **Create** and use the JSON file
+picker in the editor. Imported decks remain local to that browser; they do not
+write files into this repository or publish decks for other users.
 
 ## JSON deck format
 

@@ -45,39 +45,6 @@ test("does not duplicate a bundled deck previously imported by hand", async () =
   });
 });
 
-test("uploads a complete deck directly into the library", async () => {
-  render(<App />);
-  const file = new File(
-    [
-      JSON.stringify({
-        formatVersion: 1,
-        title: "Uploaded deck",
-        description: "Imported from a file.",
-        cards: { Front: "Back" }
-      })
-    ],
-    "uploaded-deck.json",
-    { type: "application/json" }
-  );
-
-  fireEvent.change(screen.getByLabelText("Upload deck JSON"), {
-    target: { files: [file] }
-  });
-
-  expect(await screen.findByText("Uploaded deck")).toBeTruthy();
-  expect(await screen.findByText("Added 1 deck.")).toBeTruthy();
-  await waitFor(() => {
-    const storedSets = JSON.parse(localStorage.getItem("flashcardSets"));
-    expect(storedSets).toEqual([
-      expect.objectContaining({
-        title: "Uploaded deck",
-        description: "Imported from a file.",
-        personalDeck: true
-      })
-    ]);
-  });
-});
-
 test("shows bundled attribution and license details", async () => {
   render(<App />);
   const portuguese = bundledDecks.find((deck) => deck.license);
