@@ -1,5 +1,7 @@
 const normalizedLanguage = (language) =>
-  typeof language === "string" ? language.trim().toLowerCase() : "";
+  typeof language === "string"
+    ? language.trim().replace(/_/g, "-").toLowerCase()
+    : "";
 
 const preferredVoice = (voices) =>
   voices.find((voice) => voice.default) || voices[0] || null;

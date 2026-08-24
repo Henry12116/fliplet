@@ -1010,6 +1010,7 @@ function App() {
               style={{
                 padding: "8px",
                 flex: 1,
+                minWidth: 0,
                 backgroundColor: "#1e1e1e",
                 color: "#f5f5f5",
                 border: "1px solid #555"
@@ -1024,6 +1025,7 @@ function App() {
               style={{
                 padding: "8px",
                 flex: 1,
+                minWidth: 0,
                 backgroundColor: "#1e1e1e",
                 color: "#f5f5f5",
                 border: "1px solid #555"
@@ -1035,7 +1037,8 @@ function App() {
                 padding: "8px 16px",
                 backgroundColor: "#333",
                 color: "#fff",
-                border: "1px solid #555"
+                border: "1px solid #555",
+                flexShrink: 0
               }}
             >
               Add
@@ -1163,16 +1166,17 @@ function App() {
                 onClick={() => speakCard(currentCard)}
                 style={{
                   marginTop: "16px",
-                  padding: "7px 14px",
+                  padding: "7px 10px",
                   backgroundColor: "#333",
                   color: "#fff",
                   border: "1px solid #777",
                   borderRadius: "6px",
                   cursor: "pointer",
-                  fontSize: "0.9rem"
+                  fontSize: "1.2rem",
+                  lineHeight: 1
                 }}
               >
-                Speak
+                🔊
               </button>
             )}
             {activePronunciation.enabled &&

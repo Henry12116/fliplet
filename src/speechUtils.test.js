@@ -17,6 +17,14 @@ test("prefers an exact local pronunciation voice", () => {
   expect(result).toBe(brazilianVoice);
 });
 
+test("recognizes Android locale tags that use underscores", () => {
+  const brazilianVoice = voice("pt_BR");
+
+  expect(findPronunciationVoice([brazilianVoice], "pt-BR")).toBe(
+    brazilianVoice
+  );
+});
+
 test("does not substitute another Portuguese accent for Brazilian Portuguese", () => {
   expect(
     findPronunciationVoice([voice("pt"), voice("pt-PT")], "pt-BR")

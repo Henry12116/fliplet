@@ -197,10 +197,10 @@ test("saves pronunciation settings with a deck", async () => {
   });
 });
 
-test("speaks a card with an installed Brazilian Portuguese voice", async () => {
+test("speaks with an Android Brazilian Portuguese voice tag", async () => {
   const localVoice = {
     name: "Brazilian Portuguese",
-    lang: "pt-BR",
+    lang: "pt_BR",
     localService: true,
     default: true
   };
