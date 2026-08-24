@@ -37,8 +37,7 @@ Examples can be found in [`decks`](decks).
       "enabled": true,
       "language": "pt-BR",
       "side": "front",
-      "autoPlay": false,
-      "offlineOnly": true
+      "autoPlay": false
     }
   },
   "cards": {
@@ -47,3 +46,6 @@ Examples can be found in [`decks`](decks).
   }
 }
 ```
+
+Pronunciation automatically prefers a matching voice installed on the device,
+then falls back to an online or browser-selected voice when needed.

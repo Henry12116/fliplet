@@ -10,7 +10,11 @@ const voice = (lang, options = {}) => ({
 test("prefers an exact local pronunciation voice", () => {
   const brazilianVoice = voice("pt-BR");
   const result = findPronunciationVoice(
-    [voice("pt-PT"), brazilianVoice, voice("pt-BR", { localService: false })],
+    [
+      voice("pt-PT"),
+      voice("pt-BR", { localService: false, default: true }),
+      brazilianVoice
+    ],
     "pt-BR"
   );
 
@@ -31,14 +35,12 @@ test("does not substitute another Portuguese accent for Brazilian Portuguese", (
   ).toBeNull();
 });
 
-test("does not use a remote voice in offline-only mode", () => {
+test("falls back to an exact online voice when no local voice exists", () => {
+  const onlineVoice = voice("pt-BR", { localService: false });
+
   expect(
-    findPronunciationVoice(
-      [voice("pt-BR", { localService: false })],
-      "pt-BR",
-      true
-    )
-  ).toBeNull();
+    findPronunciationVoice([voice("pt-PT"), onlineVoice], "pt-BR")
+  ).toBe(onlineVoice);
 });
 
 test("turns slash-separated card fronts into natural pauses", () => {

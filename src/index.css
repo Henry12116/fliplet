@@ -20,6 +20,28 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+.pronunciation-spinner {
+  display: block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: pronunciation-spin 0.8s linear infinite;
+}
+
+@keyframes pronunciation-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pronunciation-spinner {
+    animation: none;
+  }
+}
+
 code {
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
     monospace;

@@ -6,25 +6,21 @@ const normalizedLanguage = (language) =>
 const preferredVoice = (voices) =>
   voices.find((voice) => voice.default) || voices[0] || null;
 
-export const findPronunciationVoice = (
-  voices,
-  language,
-  offlineOnly = true
-) => {
+export const findPronunciationVoice = (voices, language) => {
   const requestedLanguage = normalizedLanguage(language);
   if (!requestedLanguage || !Array.isArray(voices)) return null;
 
-  const eligibleVoices = voices.filter(
+  const exactMatches = voices.filter(
     (voice) =>
       voice &&
       typeof voice.lang === "string" &&
-      (!offlineOnly || voice.localService === true)
+      normalizedLanguage(voice.lang) === requestedLanguage
   );
-  const exactMatches = eligibleVoices.filter(
-    (voice) => normalizedLanguage(voice.lang) === requestedLanguage
+  const localMatches = exactMatches.filter(
+    (voice) => voice.localService === true
   );
 
-  return preferredVoice(exactMatches);
+  return preferredVoice(localMatches) || preferredVoice(exactMatches);
 };
 
 export const prepareSpeechText = (value) =>

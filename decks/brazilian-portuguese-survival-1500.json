@@ -18,8 +18,7 @@
       "enabled": true,
       "language": "pt-BR",
       "side": "front",
-      "autoPlay": false,
-      "offlineOnly": true
+      "autoPlay": false
     }
   },
   "cards": {

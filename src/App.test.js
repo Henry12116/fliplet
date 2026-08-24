@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import App from "./App";
 import { bundledDecks } from "./libraryUtils";
 
@@ -191,8 +191,7 @@ test("saves pronunciation settings with a deck", async () => {
       enabled: true,
       language: "pt-BR",
       side: "front",
-      autoPlay: false,
-      offlineOnly: true
+      autoPlay: false
     });
   });
 });
@@ -234,8 +233,7 @@ test("speaks with an Android Brazilian Portuguese voice tag", async () => {
             enabled: true,
             language: "pt-BR",
             side: "front",
-            autoPlay: false,
-            offlineOnly: true
+            autoPlay: false
           }
         }
       }
@@ -248,6 +246,12 @@ test("speaks with an Android Brazilian Portuguese voice tag", async () => {
     await screen.findByRole("button", { name: "Speak card pronunciation" })
   );
 
+  const speakButton = screen.getByRole("button", {
+    name: "Speak card pronunciation"
+  });
+  expect(speakButton).toHaveAttribute("aria-busy", "true");
+  expect(speakButton).toBeDisabled();
+
   expect(cancel).toHaveBeenCalled();
   expect(speak).toHaveBeenCalledWith(
     expect.objectContaining({
@@ -256,4 +260,115 @@ test("speaks with an Android Brazilian Portuguese voice tag", async () => {
       voice: localVoice
     })
   );
+
+  act(() => speak.mock.calls[0][0].onstart());
+  expect(speakButton).toHaveAttribute("aria-busy", "false");
+  expect(speakButton).toBeEnabled();
+  expect(speakButton).toHaveTextContent("🔊");
+});
+
+test("lets the browser choose a voice when none is listed", async () => {
+  const speak = jest.fn();
+  Object.defineProperty(window, "speechSynthesis", {
+    configurable: true,
+    value: {
+      addEventListener: jest.fn(),
+      removeEventListener: jest.fn(),
+      getVoices: () => [],
+      speak,
+      cancel: jest.fn()
+    }
+  });
+  Object.defineProperty(window, "SpeechSynthesisUtterance", {
+    configurable: true,
+    value: function SpeechSynthesisUtterance(text) {
+      this.text = text;
+    }
+  });
+  localStorage.setItem(
+    "flashcardSets",
+    JSON.stringify([
+      {
+        title: "Portuguese fallback",
+        cards: [{ front: "olá", back: "hello" }],
+        study: {
+          choiceMode: "all",
+          pronunciation: {
+            enabled: true,
+            language: "pt-BR",
+            side: "front",
+            autoPlay: false
+          }
+        }
+      }
+    ])
+  );
+
+  render(<App />);
+  fireEvent.click(await screen.findByText("Portuguese fallback"));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Speak card pronunciation" })
+  );
+
+  const utterance = speak.mock.calls[0][0];
+  expect(utterance).toEqual(
+    expect.objectContaining({ text: "olá", lang: "pt-BR" })
+  );
+  expect(utterance.voice).toBeUndefined();
+  act(() => utterance.onend());
+});
+
+test("stops a pronunciation request that takes too long", async () => {
+  jest.useFakeTimers();
+  const speak = jest.fn();
+  const cancel = jest.fn();
+  Object.defineProperty(window, "speechSynthesis", {
+    configurable: true,
+    value: {
+      addEventListener: jest.fn(),
+      removeEventListener: jest.fn(),
+      getVoices: () => [],
+      speak,
+      cancel
+    }
+  });
+  Object.defineProperty(window, "SpeechSynthesisUtterance", {
+    configurable: true,
+    value: function SpeechSynthesisUtterance(text) {
+      this.text = text;
+    }
+  });
+  localStorage.setItem(
+    "flashcardSets",
+    JSON.stringify([
+      {
+        title: "Slow Portuguese",
+        cards: [{ front: "olá", back: "hello" }],
+        study: {
+          choiceMode: "all",
+          pronunciation: {
+            enabled: true,
+            language: "pt-BR",
+            side: "front",
+            autoPlay: false
+          }
+        }
+      }
+    ])
+  );
+
+  render(<App />);
+  fireEvent.click(await screen.findByText("Slow Portuguese"));
+  const speakButton = await screen.findByRole("button", {
+    name: "Speak card pronunciation"
+  });
+  fireEvent.click(speakButton);
+  expect(speakButton).toBeDisabled();
+
+  act(() => jest.advanceTimersByTime(10000));
+
+  expect(cancel).toHaveBeenCalled();
+  expect(speakButton).toBeEnabled();
+  expect(screen.getByText(/Pronunciation timed out/i)).toBeTruthy();
+  jest.useRealTimers();
 });

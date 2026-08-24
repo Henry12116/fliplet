@@ -14,8 +14,7 @@ export const DEFAULT_PRONUNCIATION_SETTINGS = {
   enabled: false,
   language: "",
   side: PRONUNCIATION_SIDES.FRONT,
-  autoPlay: false,
-  offlineOnly: true
+  autoPlay: false
 };
 
 export const DEFAULT_STUDY_SETTINGS = {
@@ -169,11 +168,7 @@ export const normalizeStudySettings = (rawStudy = {}) => {
     autoPlay:
       typeof pronunciationCandidate.autoPlay === "boolean"
         ? pronunciationCandidate.autoPlay
-        : DEFAULT_PRONUNCIATION_SETTINGS.autoPlay,
-    offlineOnly:
-      typeof pronunciationCandidate.offlineOnly === "boolean"
-        ? pronunciationCandidate.offlineOnly
-        : DEFAULT_PRONUNCIATION_SETTINGS.offlineOnly
+        : DEFAULT_PRONUNCIATION_SETTINGS.autoPlay
   };
 
   return {
@@ -314,13 +309,6 @@ export const validateStudySettings = (cards, rawStudy = {}) => {
       typeof pronunciation.autoPlay !== "boolean"
     ) {
       return "Pronunciation autoplay must be true or false.";
-    }
-
-    if (
-      hasOwn(pronunciation, "offlineOnly") &&
-      typeof pronunciation.offlineOnly !== "boolean"
-    ) {
-      return "Offline-only pronunciation must be true or false.";
     }
 
     if (pronunciation.enabled === true) {

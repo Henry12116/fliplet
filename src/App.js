@@ -1,4 +1,4 @@
-import React, { useCallback, useState, useEffect } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   buildStudyOptions,
   CHOICE_MODES,
@@ -17,6 +17,8 @@ import {
   isBundledDeck
 } from "./libraryUtils";
 import { findPronunciationVoice, prepareSpeechText } from "./speechUtils";
+
+const SPEECH_START_TIMEOUT_MS = 10000;
 
 const createDefaultStudySettings = () => ({
   ...DEFAULT_STUDY_SETTINGS,
@@ -78,6 +80,9 @@ function App() {
   );
   const [speechVoices, setSpeechVoices] = useState([]);
   const [speechVoicesLoaded, setSpeechVoicesLoaded] = useState(false);
+  const [speechPending, setSpeechPending] = useState(false);
+  const speechRequestRef = useRef(0);
+  const speechTimeoutRef = useRef(null);
   const [offlineStatus, setOfflineStatus] = useState(() =>
     typeof window !== "undefined" && window.__flipletOfflineStatus
       ? window.__flipletOfflineStatus
@@ -382,6 +387,12 @@ function App() {
     }));
   };
 
+  const clearSpeechTimeout = useCallback(() => {
+    if (speechTimeoutRef.current === null) return;
+    clearTimeout(speechTimeoutRef.current);
+    speechTimeoutRef.current = null;
+  }, []);
+
   const speakCard = useCallback(
     (card, notifyOnFailure = true) => {
       if (!card || !currentSet || currentSet === "new") return false;
@@ -404,34 +415,98 @@ function App() {
         return false;
       }
 
-      const voice = findPronunciationVoice(
-        speechVoices,
-        pronunciation.language,
-        pronunciation.offlineOnly
-      );
-      if (!voice && pronunciation.offlineOnly) {
-        if (notifyOnFailure) {
-          setModalMessage(
-            "No offline " + pronunciation.language +
-              " voice is installed on this device. Install one in your " +
-              "device's language or accessibility settings before traveling."
-          );
-        }
-        return false;
-      }
-
       const text = prepareSpeechText(card.front);
       if (!text) return false;
 
+      let availableVoices = speechVoices;
+      if (typeof window.speechSynthesis.getVoices === "function") {
+        try {
+          const refreshedVoices = Array.from(
+            window.speechSynthesis.getVoices() || []
+          );
+          if (refreshedVoices.length > 0) availableVoices = refreshedVoices;
+        } catch {
+          // Keep the last browser-reported list if refreshing is unavailable.
+        }
+      }
+      const voice = findPronunciationVoice(
+        availableVoices,
+        pronunciation.language
+      );
       const utterance = new window.SpeechSynthesisUtterance(text);
       utterance.lang = pronunciation.language;
       if (voice) utterance.voice = voice;
 
-      window.speechSynthesis.cancel();
-      window.speechSynthesis.speak(utterance);
+      const requestId = speechRequestRef.current + 1;
+      speechRequestRef.current = requestId;
+      clearSpeechTimeout();
+      setSpeechPending(true);
+
+      const finishLoading = () => {
+        if (speechRequestRef.current !== requestId) return false;
+        clearSpeechTimeout();
+        setSpeechPending(false);
+        return true;
+      };
+      const failSpeech = (message) => {
+        if (speechRequestRef.current !== requestId) return;
+        speechRequestRef.current += 1;
+        clearSpeechTimeout();
+        setSpeechPending(false);
+        try {
+          window.speechSynthesis.cancel();
+        } catch {
+          // The browser has already abandoned this request.
+        }
+        if (notifyOnFailure) setModalMessage(message);
+      };
+
+      utterance.onstart = finishLoading;
+      utterance.onend = finishLoading;
+      utterance.onerror = () =>
+        failSpeech(
+          "Pronunciation could not load. Check your connection and try again."
+        );
+      speechTimeoutRef.current = setTimeout(
+        () =>
+          failSpeech(
+            "Pronunciation timed out. Check your connection and try again."
+          ),
+        SPEECH_START_TIMEOUT_MS
+      );
+
+      try {
+        window.speechSynthesis.cancel();
+        window.speechSynthesis.speak(utterance);
+      } catch {
+        failSpeech(
+          "Pronunciation could not start in this browser. Please try again."
+        );
+        return false;
+      }
       return true;
     },
-    [currentSet, speechVoices]
+    [clearSpeechTimeout, currentSet, speechVoices]
+  );
+
+  useEffect(() => {
+    speechRequestRef.current += 1;
+    clearSpeechTimeout();
+    setSpeechPending(false);
+    if (typeof window !== "undefined" && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+  }, [clearSpeechTimeout, currentCard, studyMode]);
+
+  useEffect(
+    () => () => {
+      speechRequestRef.current += 1;
+      clearSpeechTimeout();
+      if (typeof window !== "undefined" && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+    },
+    [clearSpeechTimeout]
   );
 
   useEffect(() => {
@@ -453,15 +528,6 @@ function App() {
     speakCard(currentCard, false);
     return undefined;
   }, [currentCard, currentSet, modalMessage, speakCard, studyMode]);
-
-  useEffect(
-    () => () => {
-      if (typeof window !== "undefined" && window.speechSynthesis) {
-        window.speechSynthesis.cancel();
-      }
-    },
-    [currentCard, modalMessage, studyMode]
-  );
 
   // Simple modal
   const Modal = ({ message, onClose }) => {
@@ -549,11 +615,6 @@ function App() {
     typeof window !== "undefined" &&
     Boolean(window.speechSynthesis) &&
     typeof window.SpeechSynthesisUtterance === "function";
-  const activePronunciationVoice = findPronunciationVoice(
-    speechVoices,
-    activePronunciation.language,
-    activePronunciation.offlineOnly
-  );
   const pronunciationStatus = (pronunciation) => {
     if (!pronunciation.enabled) return "Pronunciation is off.";
     if (!pronunciation.language.trim()) {
@@ -566,12 +627,13 @@ function App() {
 
     const voice = findPronunciationVoice(
       speechVoices,
-      pronunciation.language,
-      pronunciation.offlineOnly
+      pronunciation.language
     );
     if (voice) {
       return (
-        (voice.localService ? "Offline voice ready: " : "Voice ready: ") +
+        (voice.localService
+          ? "On-device voice ready: "
+          : "Online voice available: ") +
         voice.name +
         " (" +
         voice.lang +
@@ -579,9 +641,11 @@ function App() {
       );
     }
 
-    return pronunciation.offlineOnly
-      ? "No offline " + pronunciation.language + " voice is installed."
-      : "No matching voice was reported; the browser may use its default.";
+    return (
+      "The browser will choose a " +
+      pronunciation.language +
+      " voice automatically."
+    );
   };
 
   return (
@@ -967,19 +1031,16 @@ function App() {
                   Speak automatically when each card appears
                 </label>
 
-                <label style={{ display: "block", marginBottom: "10px" }}>
-                  <input
-                    type="checkbox"
-                    checked={editorPronunciation.offlineOnly}
-                    onChange={(event) =>
-                      updatePronunciationSetting(
-                        "offlineOnly",
-                        event.target.checked
-                      )
-                    }
-                  />{" "}
-                  Only use a voice installed on this device
-                </label>
+                <small
+                  style={{
+                    display: "block",
+                    color: "#bbb",
+                    marginBottom: "10px"
+                  }}
+                >
+                  Uses a voice on this device first, then tries online
+                  automatically.
+                </small>
 
                 <small
                   role="status"
@@ -987,11 +1048,10 @@ function App() {
                     display: "block",
                     color: findPronunciationVoice(
                       speechVoices,
-                      editorPronunciation.language,
-                      editorPronunciation.offlineOnly
+                      editorPronunciation.language
                     )
                       ? "#8bd18b"
-                      : "#e7c36a"
+                      : "#bbb"
                   }}
                 >
                   {pronunciationStatus(editorPronunciation)}
@@ -1163,27 +1223,38 @@ function App() {
               <button
                 type="button"
                 aria-label="Speak card pronunciation"
+                aria-busy={speechPending}
+                disabled={speechPending}
                 onClick={() => speakCard(currentCard)}
                 style={{
                   marginTop: "16px",
-                  padding: "7px 10px",
+                  width: "42px",
+                  height: "34px",
+                  padding: 0,
                   backgroundColor: "#333",
                   color: "#fff",
                   border: "1px solid #777",
                   borderRadius: "6px",
-                  cursor: "pointer",
+                  cursor: speechPending ? "wait" : "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
                   fontSize: "1.2rem",
                   lineHeight: 1
                 }}
               >
-                🔊
+                {speechPending ? (
+                  <span
+                    className="pronunciation-spinner"
+                    aria-hidden="true"
+                  />
+                ) : (
+                  "🔊"
+                )}
               </button>
             )}
             {activePronunciation.enabled &&
-              (!speechSupported ||
-                !speechVoicesLoaded ||
-                (activePronunciation.offlineOnly &&
-                  !activePronunciationVoice)) && (
+              (!speechSupported || !speechVoicesLoaded) && (
                 <small
                   role="status"
                   style={{

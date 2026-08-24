@@ -25,8 +25,7 @@ test("loads every repository deck as a normalized built-in", () => {
   );
   expect(portuguese.study.pronunciation).toMatchObject({
     enabled: true,
-    language: "pt-BR",
-    offlineOnly: true
+    language: "pt-BR"
   });
   expect(portuguese).toMatchObject({
     license: "CC BY-SA 4.0",

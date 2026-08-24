@@ -50,8 +50,7 @@ test("normalizes explicit pronunciation settings", () => {
         enabled: true,
         language: " pt-BR ",
         side: PRONUNCIATION_SIDES.FRONT,
-        autoPlay: true,
-        offlineOnly: false
+        autoPlay: true
       }
     }
   });
@@ -61,8 +60,7 @@ test("normalizes explicit pronunciation settings", () => {
     enabled: true,
     language: "pt-BR",
     side: "front",
-    autoPlay: true,
-    offlineOnly: false
+    autoPlay: true
   });
 });
 
@@ -111,9 +109,6 @@ test("validates explicit pronunciation fields strictly", () => {
   expect(() =>
     normalizeDeck(makeDeck({ autoPlay: "yes" }))
   ).toThrow(/autoplay must be true or false/i);
-  expect(() =>
-    normalizeDeck(makeDeck({ offlineOnly: 1 }))
-  ).toThrow(/offline-only pronunciation must be true or false/i);
 });
 
 test("enabled pronunciation requires a plausible language tag", () => {
