@@ -14,8 +14,12 @@
     "web-vitals": "^2.1.4"
   },
   "scripts": {
+    "generate-decks": "node scripts/generate-bundled-decks.js",
+    "prestart": "npm run generate-decks",
     "start": "react-scripts start",
+    "prebuild": "npm run generate-decks",
     "build": "react-scripts build",
+    "pretest": "npm run generate-decks",
     "test": "react-scripts test",
     "eject": "react-scripts eject"
   },

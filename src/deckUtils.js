@@ -63,6 +63,36 @@ export const uniqueStrings = (values) => {
   return result;
 };
 
+const OPTIONAL_DECK_TEXT_FIELDS = [
+  "description",
+  "attribution",
+  "license",
+  "licenseUrl"
+];
+
+export const getDeckMetadata = (value) => {
+  if (!isRecord(value)) return {};
+
+  const metadata = {};
+
+  OPTIONAL_DECK_TEXT_FIELDS.forEach((field) => {
+    if (typeof value[field] !== "string") return;
+    const cleaned = value[field].trim();
+    if (cleaned) metadata[field] = cleaned;
+  });
+
+  if (typeof value.source === "string" && value.source.trim()) {
+    metadata.source = value.source.trim();
+  }
+
+  if (Array.isArray(value.sources)) {
+    const sources = uniqueStrings(value.sources);
+    if (sources.length > 0) metadata.sources = sources;
+  }
+
+  return metadata;
+};
+
 export const normalizeCards = (rawCards) => {
   let cards;
 
@@ -208,7 +238,8 @@ export const normalizeDeck = (rawDeck, fallback = {}) => {
     formatVersion: FORMAT_VERSION,
     title: rawTitle || fallbackTitle,
     cards,
-    study
+    study,
+    ...getDeckMetadata(envelope ? rawDeck : {})
   };
 };
 

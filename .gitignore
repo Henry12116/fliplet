@@ -10,6 +10,7 @@
 
 # production
 /build
+/src/generated/bundledDecks.json
 
 # misc
 .DS_Store

@@ -4,12 +4,19 @@ import {
   CHOICE_MODES,
   DEFAULT_PRONUNCIATION_SETTINGS,
   DEFAULT_STUDY_SETTINGS,
+  getDeckMetadata,
   isDeckEnvelope,
   normalizeDeck,
   normalizeStudySettings,
   shuffleArray,
   validateStudySettings
 } from "./deckUtils";
+import {
+  buildSetLibrary,
+  getPersonalSets,
+  getUniqueDeckAdditions,
+  isBundledDeck
+} from "./libraryUtils";
 import { findPronunciationVoice, prepareSpeechText } from "./speechUtils";
 
 const createDefaultStudySettings = () => ({
@@ -19,8 +26,49 @@ const createDefaultStudySettings = () => ({
   pronunciation: { ...DEFAULT_PRONUNCIATION_SETTINGS }
 });
 
+const readFileAsText = (file) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (event) => resolve(event.target.result);
+    reader.onerror = () =>
+      reject(reader.error || new Error("The file could not be read."));
+    reader.readAsText(file);
+  });
+
+const fallbackTitleFromFile = (file) =>
+  file.name.replace(/\.json$/i, "").replace(/[-_]+/g, " ").trim();
+
+const hasDeckDetails = (deck) =>
+  Boolean(
+    deck.description ||
+      deck.attribution ||
+      deck.source ||
+      deck.sources?.length ||
+      deck.license ||
+      deck.licenseUrl
+  );
+
+const formatDeckDetails = (deck) => {
+  const details = [deck.title];
+
+  if (deck.description) details.push(deck.description);
+  if (deck.attribution) details.push("Attribution: " + deck.attribution);
+  if (deck.source) details.push("Source: " + deck.source);
+  if (deck.sources?.length) {
+    details.push("Sources:\n" + deck.sources.join("\n"));
+  }
+  if (deck.license || deck.licenseUrl) {
+    const licenseDetails = [];
+    if (deck.license) licenseDetails.push("License: " + deck.license);
+    if (deck.licenseUrl) licenseDetails.push(deck.licenseUrl);
+    details.push(licenseDetails.join("\n"));
+  }
+
+  return details.join("\n\n");
+};
+
 function App() {
-  const [sets, setSets] = useState([]);
+  const [sets, setSets] = useState(() => buildSetLibrary([]));
   const [initialized, setInitialized] = useState(false);
   const [currentSet, setCurrentSet] = useState(null);
   const [title, setTitle] = useState("");
@@ -37,6 +85,7 @@ function App() {
   const [studyOptions, setStudyOptions] = useState([]);
   const [modalMessage, setModalMessage] = useState("");
   const [editingSetIndex, setEditingSetIndex] = useState(null);
+  const [editingMetadata, setEditingMetadata] = useState({});
   const [studySettings, setStudySettings] = useState(
     createDefaultStudySettings
   );
@@ -102,11 +151,7 @@ function App() {
           throw new Error("Saved flashcard data must be a list of sets.");
         }
 
-        setSets(
-          parsedSets.map((set, index) =>
-            normalizeDeck(set, { title: "Set " + (index + 1) })
-          )
-        );
+        setSets(buildSetLibrary(parsedSets));
       } catch (error) {
         setModalMessage({
           text:
@@ -118,7 +163,7 @@ function App() {
             try {
               localStorage.setItem("flashcardSetsBackup", savedSets);
               localStorage.removeItem("flashcardSets");
-              setSets([]);
+              setSets(buildSetLibrary([]));
               setInitialized(true);
               setModalMessage(
                 "The unreadable data was preserved as flashcardSetsBackup. " +
@@ -134,6 +179,8 @@ function App() {
         });
         return;
       }
+    } else {
+      setSets(buildSetLibrary([]));
     }
     setInitialized(true);
   }, []);
@@ -141,7 +188,10 @@ function App() {
   // Save sets whenever updated
   useEffect(() => {
     if (initialized) {
-      localStorage.setItem("flashcardSets", JSON.stringify(sets));
+      localStorage.setItem(
+        "flashcardSets",
+        JSON.stringify(getPersonalSets(sets))
+      );
     }
   }, [sets, initialized]);
 
@@ -151,6 +201,7 @@ function App() {
     setNewKey("");
     setNewValue("");
     setEditingSetIndex(null);
+    setEditingMetadata({});
     setStudySettings(createDefaultStudySettings());
   };
 
@@ -186,6 +237,7 @@ function App() {
     }
 
     const savedSet = {
+      ...editingMetadata,
       formatVersion: 1,
       title: title.trim(),
       cards: [...cards],
@@ -235,6 +287,7 @@ function App() {
         if (isDeckEnvelope(importedCards)) {
           if (importedDeck.title) setTitle(importedDeck.title);
           setStudySettings(importedDeck.study);
+          setEditingMetadata(getDeckMetadata(importedDeck));
         }
         setModalMessage(
           "Imported " + importedDeck.cards.length + " cards successfully."
@@ -245,6 +298,65 @@ function App() {
       event.target.value = "";
     };
     reader.readAsText(file);
+  };
+
+  const uploadDecks = async (event) => {
+    const files = Array.from(event.target.files || []);
+    event.target.value = "";
+    if (files.length === 0) return;
+
+    if (!initialized) {
+      setModalMessage(
+        "Uploading is disabled while unreadable saved data is being preserved. " +
+          "Resolve the saved-data prompt first."
+      );
+      return;
+    }
+
+    const importedDecks = [];
+    const failures = [];
+
+    for (const file of files) {
+      try {
+        const rawDeck = JSON.parse(await readFileAsText(file));
+        importedDecks.push(
+          normalizeDeck(rawDeck, {
+            title: fallbackTitleFromFile(file),
+            study: createDefaultStudySettings()
+          })
+        );
+      } catch (error) {
+        failures.push(file.name + ": " + error.message);
+      }
+    }
+
+    const uniqueDecks = getUniqueDeckAdditions(sets, importedDecks);
+    if (uniqueDecks.length > 0) {
+      setSets((current) => [
+        ...current,
+        ...getUniqueDeckAdditions(current, uniqueDecks)
+      ]);
+    }
+
+    const duplicateCount = importedDecks.length - uniqueDecks.length;
+    const message = [];
+    if (uniqueDecks.length > 0) {
+      message.push(
+        "Added " + uniqueDecks.length +
+          (uniqueDecks.length === 1 ? " deck." : " decks.")
+      );
+    }
+    if (duplicateCount > 0) {
+      message.push(
+        "Skipped " + duplicateCount +
+          (duplicateCount === 1 ? " duplicate." : " duplicates.")
+      );
+    }
+    if (failures.length > 0) {
+      message.push("Could not add:\n" + failures.join("\n"));
+    }
+
+    setModalMessage(message.join("\n\n") || "No decks were added.");
   };
 
   const startStudy = (setIndex) => {
@@ -271,14 +383,27 @@ function App() {
 
   const editSet = (setIndex) => {
     const set = sets[setIndex];
+    if (isBundledDeck(set)) {
+      setModalMessage(
+        "Built-in decks come from the repository and cannot be edited here."
+      );
+      return;
+    }
     setCurrentSet("new");
     setTitle(set.title);
     setCards([...set.cards]);
     setStudySettings(normalizeStudySettings(set.study));
+    setEditingMetadata(getDeckMetadata(set));
     setEditingSetIndex(setIndex);
   };
 
   const deleteSet = (setIndex) => {
+    if (isBundledDeck(sets[setIndex])) {
+      setModalMessage(
+        "Built-in decks always stay available and cannot be deleted here."
+      );
+      return;
+    }
     setModalMessage({
       text: "Are you sure you want to delete this set?",
       onConfirm: () => {
@@ -578,9 +703,33 @@ function App() {
             >
               + Create
             </div>
+            <label
+              style={{
+                border: "2px dashed #888",
+                padding: "20px",
+                cursor: initialized ? "pointer" : "not-allowed",
+                textAlign: "center",
+                width: "120px",
+                backgroundColor: "#1e1e1e",
+                opacity: initialized ? 1 : 0.6
+              }}
+            >
+              + Upload
+              <input
+                type="file"
+                aria-label="Upload deck JSON"
+                accept=".json,application/json"
+                multiple
+                disabled={!initialized}
+                onChange={uploadDecks}
+                style={{ display: "none" }}
+              />
+            </label>
             {sets.map((s, i) => (
               <div
-                key={i}
+                key={s.bundledDeckId || i}
+                role="group"
+                aria-label={s.title + " deck"}
                 style={{
                   border: "1px solid #444",
                   padding: "10px",
@@ -594,8 +743,30 @@ function App() {
                 <div style={{ cursor: "pointer" }} onClick={() => startStudy(i)}>
                   <h2 style={{ fontSize: "1rem" }}>{s.title}</h2>
                   <p>{s.cards.length} cards</p>
+                  {isBundledDeck(s) && (
+                    <small style={{ color: "#8bd18b" }}>Built in</small>
+                  )}
                 </div>
-                {hoverIndex === i && (
+                {hasDeckDetails(s) && (
+                  <button
+                    type="button"
+                    onClick={() => setModalMessage(formatDeckDetails(s))}
+                    aria-label={"Details for " + s.title}
+                    style={{
+                      display: "block",
+                      marginTop: "8px",
+                      padding: 0,
+                      background: "none",
+                      border: "none",
+                      color: "#9ecbff",
+                      cursor: "pointer",
+                      textDecoration: "underline"
+                    }}
+                  >
+                    Details
+                  </button>
+                )}
+                {hoverIndex === i && !isBundledDeck(s) && (
                   <div
                     style={{
                       position: "absolute",

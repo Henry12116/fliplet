@@ -66,6 +66,29 @@ test("normalizes explicit pronunciation settings", () => {
   });
 });
 
+test("preserves supported description, source, and license metadata", () => {
+  const deck = normalizeDeck({
+    formatVersion: 1,
+    title: "Licensed deck",
+    description: " A useful deck. ",
+    attribution: " Example Author ",
+    source: " https://example.com/source ",
+    sources: ["https://example.com/one", "https://example.com/one", ""],
+    license: " CC BY-SA 4.0 ",
+    licenseUrl: " https://creativecommons.org/licenses/by-sa/4.0/ ",
+    cards: { Question: "Answer" }
+  });
+
+  expect(deck).toMatchObject({
+    description: "A useful deck.",
+    attribution: "Example Author",
+    source: "https://example.com/source",
+    sources: ["https://example.com/one"],
+    license: "CC BY-SA 4.0",
+    licenseUrl: "https://creativecommons.org/licenses/by-sa/4.0/"
+  });
+});
+
 test("validates explicit pronunciation fields strictly", () => {
   const makeDeck = (pronunciation) => ({
     formatVersion: 1,
